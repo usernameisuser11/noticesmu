@@ -1,0 +1,42 @@
+body {
+    font-family: sans-serif;
+    padding: 20px;
+}
+
+.cat-btn {
+    padding: 10px 18px;
+    background: #1f2a75;   /* 더 어두운 파란색 */
+    color: #fff;
+    border-radius: 8px;
+    margin: 6px;
+    cursor: pointer;
+    display: inline-block;
+}
+
+.sub-btn {
+    padding: 7px 10px;
+    margin: 4px;
+    border-radius: 6px;
+    border: 1px solid #999;
+    cursor: pointer;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+td, th {
+    padding: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+a {
+    color: #1a0dab;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
