@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>상명대 공지</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <!-- Flask에서 groups를 안전하게 JSON으로 전달 -->
+    <script id="groups-data" type="application/json">
+        {{ groups|tojson|safe }}
+    </script>
+</head>
+<body>
+    <h1 style="text-align:center">상명대 공지</h1>
+
+    <div id="top"></div>
+    <div id="sub"></div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>제목</th>
+                <th>작성자</th>
+                <th>날짜</th>
+            </tr>
+        </thead>
+        <tbody id="tb"></tbody>
+    </table>
+
+    <script>
+        // VS코드에서 빨간줄 없음
+        const CATS = JSON.parse(document.getElementById("groups-data").textContent);
+        let curMain = null;
+
+        function init() {
+            const t = document.getElementById("top");
+            for (let k in CATS) {
+                const b = document.createElement("div");
+                b.className = "cat-btn";
+                b.innerText = k;
+                b.onclick = () => {
+                    curMain = k;
+                    if (CATS[curMain] && CATS[curMain].length > 0) {
+                        renderSubs();
+                    }
+                    fetchGroup();
+                };
+                t.appendChild(b);
+            }
+        }
+
+        function renderSubs() {
+            if (!curMain || !CATS[curMain]) return;
+
+            const s = document.getElementById("sub");
+            s.innerHTML = "";
+            CATS[curMain].forEach(sub => {
+                const b = document.createElement("button");
+                b.className = "sub-btn";
+                b.innerText = sub;
+                b.onclick = () => fetchSub(sub);
+                s.appendChild(b);
+            });
+        }
+
+        async function fetchGroup() {
+            if (!curMain) return;
+            const r = await fetch("/fetch?group=" + encodeURIComponent(curMain));
+            const j = await r.json();
+            render(j.items);
+        }
+
+        async function fetchSub(sub) {
+            if (!sub) return;
+            const r = await fetch("/fetch?sub=" + encodeURIComponent(sub));
+            const j = await r.json();
+            render(j.items);
+        }
+
+        function render(items) {
+            const tb = document.getElementById("tb");
+            tb.innerHTML = "";
+            items.forEach((x, i) => {
+                tb.innerHTML += `
+                <tr>
+                    <td>${i+1}</td>
+                    <td><a href="${x.link}" target="_blank">${x.title}</a></td>
+                    <td>${x.author || ""}</td>
+                    <td>${x.date || ""}</td>
+                </tr>`;
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
