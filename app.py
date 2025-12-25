@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import re  # ✅ 작성일/날짜 텍스트 추출용
 
 app = Flask(__name__)
 
@@ -56,32 +57,55 @@ NOTICE_SELECTORS = [
     "table.board-table tbody tr",
 ]
 
+# ✅ 날짜 텍스트에서 잡아낼 정규식들
+RE_DATE_WRITTEN = re.compile(r"작성일\s*[:：]?\s*(20\d{2}[./-]\d{2}[./-]\d{2})")
+RE_DATE_ANY = re.compile(r"\b(20\d{2}[./-]\d{2}[./-]\d{2})\b")
+
 def parse_notice_list(html, base):
     soup = BeautifulSoup(html, "html.parser")
-
-    rows = []
-    for sel in NOTICE_SELECTORS:
-        rows = soup.select(sel)
-        if rows:
-            break
-
     items = []
-    for r in rows[:30]:
-        a = r.find("a")
+    elems = []
+
+    for sel in NOTICE_SELECTORS:
+        elems = soup.select(sel)
+        if elems:
+            break
+    if not elems:
+        return items
+
+    for el in elems[:60]:
+        a = el.find("a")
         if not a:
             continue
 
         title = a.get_text(strip=True)
-        href = a.get("href", "").strip()
-        url = urljoin(base, href)
+        link = urljoin(base, a.get("href") or "")
 
+        # ===== 작성자 =====
+        author = ""
+        w = el.find(class_="writer") or el.find("td", {"data-role": "writer"})
+        if not w:
+            w = el.find("td", class_="writer")
+        if w:
+            author = w.get_text(strip=True)
+
+        # ===== 날짜(작성일) =====
         date = ""
-        # 흔한 날짜 위치들
-        date_el = r.select_one(".date") or r.select_one("td.date") or r.select_one("span.date")
-        if date_el:
-            date = date_el.get_text(strip=True)
+        d = el.find(class_="date") or el.find("td", {"data-role": "date"})
+        if not d:
+            d = el.find("td", class_="date")
+        if d:
+            date = d.get_text(strip=True)
 
-        items.append({"title": title, "url": url, "date": date})
+        # ✅ (추가) class로 못 찾으면 텍스트에서 "작성일 YYYY-MM-DD" 또는 날짜 패턴 추출
+        if not date:
+            text_all = " ".join(el.stripped_strings)
+            m = RE_DATE_WRITTEN.search(text_all) or RE_DATE_ANY.search(text_all)
+            if m:
+                date = m.group(1).replace(".", "-").replace("/", "-")
+
+        items.append({"title": title, "link": link, "author": author, "date": date})
+
     return items
 
 def fetch_one(url):
@@ -91,22 +115,27 @@ def fetch_one(url):
         r = SESSION.get(url, headers=HEADERS, timeout=7)
         r.raise_for_status()
         return parse_notice_list(r.text, url)
-    except Exception as e:
-        app.logger.warning(f"fetch_one failed: {url} / {e}")
+    except:
         return []
 
 @app.route("/fetch")
-def fetch():
-    group = request.args.get("group", "")
-    sub = request.args.get("sub", "")
+def fetch_api():
+    group = request.args.get("group")
+    sub = request.args.get("sub")
 
-    if group in CATEGORIES:
-        val = CATEGORIES[group]
-        if isinstance(val, dict) and sub:
-            url = val.get(sub, "")
-            return jsonify({"items": fetch_one(url)})
-        if isinstance(val, dict) and not sub:
-            # 하위 모두 합치기
+    flat = {}
+    for g, v in CATEGORIES.items():
+        if isinstance(v, dict):
+            flat.update(v)
+        else:
+            flat[g] = v
+
+    if sub:
+        return jsonify({"items": fetch_one(flat.get(sub, ""))})
+
+    if group:
+        val = CATEGORIES.get(group)
+        if isinstance(val, dict):
             results = []
             with ThreadPoolExecutor(max_workers=10) as ex:
                 tasks = [ex.submit(fetch_one, u) for u in val.values()]
@@ -114,6 +143,7 @@ def fetch():
                     results.extend(f.result())
             return jsonify({"items": results})
         return jsonify({"items": fetch_one(val)})
+
     return jsonify({"items": []})
 
 @app.route("/")
