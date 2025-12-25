@@ -13,6 +13,8 @@ CATEGORIES = {
         "글로벌": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=190",
         "진로취업": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=162",
         "등록/장학": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=22",
+        # ✅ 추가
+        "사회 봉사": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=21&srCampus=&srSearchKey=&srSearchVal=",
         "비교과 일반": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=420"
     },
     "학부(과)/전공": {
@@ -27,6 +29,10 @@ CATEGORIES = {
         "휴먼AI공학전공": "https://hi.smu.ac.kr/hi/community/notice.do",
         "식품영양학전공": "https://food.smu.ac.kr/foodnutrition/community/notice.do",
         "국가안보학과": "https://ns.smu.ac.kr/sdms/community/notice.do",
+        # ✅ 추가 3개
+        "가족복지학과": "https://www.smu.ac.kr/smfamily/community/notice.do",
+        "화공신소재전공": "https://icee.smu.ac.kr/ichemistry/community/notice.do",
+        "국어교육과": "https://www.smu.ac.kr/koredu/community/notice.do",
         "글로벌경영학과": "https://gbiz.smu.ac.kr/newmajoritb/board/notice.do"
     },
     "SW중심 사업단": "https://swai.smu.ac.kr/bbs/board.php?bo_table=07_01",
@@ -52,58 +58,55 @@ NOTICE_SELECTORS = [
 
 def parse_notice_list(html, base):
     soup = BeautifulSoup(html, "html.parser")
-    items = []
-    elems = []
+
+    rows = []
     for sel in NOTICE_SELECTORS:
-        elems = soup.select(sel)
-        if elems:
+        rows = soup.select(sel)
+        if rows:
             break
-    if not elems:
-        return items
-    for el in elems[:60]:
-        a = el.find("a")
+
+    items = []
+    for r in rows[:30]:
+        a = r.find("a")
         if not a:
             continue
+
         title = a.get_text(strip=True)
-        link = urljoin(base, a.get("href") or "")
-        author = ""
-        w = el.find(class_="writer") or el.find("td", {"data-role": "writer"})
-        if not w:
-            w = el.find("td", class_="writer")
-        if w:
-            author = w.get_text(strip=True)
+        href = a.get("href", "").strip()
+        url = urljoin(base, href)
+
         date = ""
-        d = el.find(class_="date") or el.find("td", {"data-role": "date"})
-        if not d:
-            d = el.find("td", class_="date")
-        if d:
-            date = d.get_text(strip=True)
-        items.append({"title": title, "link": link, "author": author, "date": date})
+        # 흔한 날짜 위치들
+        date_el = r.select_one(".date") or r.select_one("td.date") or r.select_one("span.date")
+        if date_el:
+            date = date_el.get_text(strip=True)
+
+        items.append({"title": title, "url": url, "date": date})
     return items
 
 def fetch_one(url):
+    if not url:
+        return []
     try:
         r = SESSION.get(url, headers=HEADERS, timeout=7)
         r.raise_for_status()
         return parse_notice_list(r.text, url)
-    except:
+    except Exception as e:
+        app.logger.warning(f"fetch_one failed: {url} / {e}")
         return []
 
 @app.route("/fetch")
-def fetch_api():
-    group = request.args.get("group")
-    sub = request.args.get("sub")
-    flat = {}
-    for g, v in CATEGORIES.items():
-        if isinstance(v, dict):
-            flat.update(v)
-        else:
-            flat[g] = v
-    if sub:
-        return jsonify({"items": fetch_one(flat.get(sub, ""))})
-    if group:
-        val = CATEGORIES.get(group)
-        if isinstance(val, dict):
+def fetch():
+    group = request.args.get("group", "")
+    sub = request.args.get("sub", "")
+
+    if group in CATEGORIES:
+        val = CATEGORIES[group]
+        if isinstance(val, dict) and sub:
+            url = val.get(sub, "")
+            return jsonify({"items": fetch_one(url)})
+        if isinstance(val, dict) and not sub:
+            # 하위 모두 합치기
             results = []
             with ThreadPoolExecutor(max_workers=10) as ex:
                 tasks = [ex.submit(fetch_one, u) for u in val.values()]
