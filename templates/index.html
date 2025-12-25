@@ -29,7 +29,6 @@
     </table>
 
     <script>
-        // VS코드에서 빨간줄 없음
         const CATS = JSON.parse(document.getElementById("groups-data").textContent);
         let curMain = null;
 
@@ -41,6 +40,10 @@
                 b.innerText = k;
                 b.onclick = () => {
                     curMain = k;
+
+                    // ✅ 메인 카테고리 바뀔 때마다 하위 영역 초기화(버그 수정)
+                    document.getElementById("sub").innerHTML = "";
+
                     if (CATS[curMain] && CATS[curMain].length > 0) {
                         renderSubs();
                     }
@@ -82,10 +85,11 @@
             const tb = document.getElementById("tb");
             tb.innerHTML = "";
             items.forEach((x, i) => {
+                const link = x.link || x.url || "#"; // ✅ 안전장치
                 tb.innerHTML += `
                 <tr>
                     <td>${i+1}</td>
-                    <td><a href="${x.link}" target="_blank">${x.title}</a></td>
+                    <td><a href="${link}" target="_blank" rel="noopener noreferrer">${x.title || ""}</a></td>
                     <td>${x.author || ""}</td>
                     <td>${x.date || ""}</td>
                 </tr>`;
