@@ -14,7 +14,7 @@ CATEGORIES = {
         "글로벌": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=190",
         "진로취업": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=162",
         "등록/장학": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=22",
-        # ✅ 추가
+        # 추가항목
         "사회 봉사": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=21&srCampus=&srSearchKey=&srSearchVal=",
         "비교과 일반": "https://www.smu.ac.kr/kor/life/notice.do?mode=list&srCategoryId1=420"
     },
@@ -30,13 +30,12 @@ CATEGORIES = {
         "휴먼AI공학전공": "https://hi.smu.ac.kr/hi/community/notice.do",
         "식품영양학전공": "https://food.smu.ac.kr/foodnutrition/community/notice.do",
         "국가안보학과": "https://ns.smu.ac.kr/sdms/community/notice.do",
-        # ✅ 추가 3개
+        # 추가항목
         "가족복지학과": "https://www.smu.ac.kr/smfamily/community/notice.do",
         "화공신소재전공": "https://icee.smu.ac.kr/ichemistry/community/notice.do",
         "국어교육과": "https://www.smu.ac.kr/koredu/community/notice.do",
         "글로벌경영학과": "https://gbiz.smu.ac.kr/newmajoritb/board/notice.do"
     },
-    "SW중심 사업단": "https://swai.smu.ac.kr/bbs/board.php?bo_table=07_01",
     "기숙사": {
         "상명 행복생활관": "https://dormitory.smu.ac.kr/dormi/happy/happy_notice.do",
         "스뮤하우스": "https://dormitory.smu.ac.kr/dormi/smu/smu_notice.do"
@@ -154,3 +153,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
