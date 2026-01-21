@@ -3,7 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import re  # ✅ 날짜/작성자 텍스트 추출용(추가)
+import re
+import time
 
 app = Flask(__name__)
 
@@ -43,21 +44,29 @@ CATEGORIES = {
     "대학원": "https://grad.smu.ac.kr/grad/board/notice.do",
     "공학교육인증센터": "https://icee.smu.ac.kr/icee/community/notice.do",
 
-    # ✅ (추가) 학술정보관(도서관) 공지
-    # 기존 카테고리/링크는 절대 건드리지 않고, 새 그룹만 추가
+    # ✅ (추가) 학술정보관
     "학술정보관": {
         "서울캠퍼스": "https://lib.smu.ac.kr/Board?n=notice",
         "천안캠퍼스": "http://libnt.smuc.ac.kr/Board?n=notice"
-    }
+    },
 }
 
 SESSION = requests.Session()
-HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ===== 공지 목록 구조 셀렉터 =====
-# ✅ 기존 셀렉터는 그대로 두고, 학술정보관(dl.onroad-board)만 맨 앞에 "추가"
+# 기존 헤더(기존 사이트 영향 최소)
+HEADERS_DEFAULT = {"User-Agent": "Mozilla/5.0"}
+
+# 학술정보관 전용 헤더(차단/빈페이지 방지용) - 다른 사이트엔 적용 안 함
+HEADERS_LIB = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6",
+    "Connection": "keep-alive",
+}
+
+# ✅ 학술정보관(dl 구조)만 "추가" (기존 셀렉터 그대로 유지)
 NOTICE_SELECTORS = [
-    "dl.onroad-board",  # ✅ (추가) 학술정보관 공지 구조
+    "dl.onroad-board",  # ✅ 학술정보관 공지 목록 구조
 
     "table.board_list tbody tr",
     "table.boardList tbody tr",
@@ -67,20 +76,38 @@ NOTICE_SELECTORS = [
     "table.board-table tbody tr",
 ]
 
-# ✅ 날짜 텍스트에서 잡아낼 정규식들(추가: 기존 사이트 영향 없음, 못 찾을 때만 fallback)
+# 날짜/작성자 텍스트 패턴(기존 영향 없음: 못 찾을 때만 fallback)
 RE_DATE_WRITTEN = re.compile(r"작성일\s*[:：]?\s*(20\d{2}[./-]\d{2}[./-]\d{2})")
 RE_DATE_PUBLISHED = re.compile(r"게시일\s*[:：]?\s*(20\d{2}[./-]\d{2}[./-]\d{2})")
 RE_DATE_ANY = re.compile(r"\b(20\d{2}[./-]\d{2}[./-]\d{2})\b")
-
-# ✅ 작성자(글쓴이) 추출용(추가: 기존 사이트 영향 없음, 못 찾을 때만 fallback)
 RE_AUTHOR = re.compile(r"글쓴이\s*([^\s/]+)")
+
+def is_library_url(url: str) -> bool:
+    return ("lib.smu.ac.kr" in (url or "")) or ("libnt.smuc.ac.kr" in (url or ""))
+
+# ✅ 간단 캐시(속도용) - 30초만, 결과형태는 그대로
+_CACHE = {}  # key: url, value: (expire_ts, items)
+
+def cache_get(url: str):
+    now = time.time()
+    v = _CACHE.get(url)
+    if not v:
+        return None
+    exp, items = v
+    if now <= exp:
+        return items
+    _CACHE.pop(url, None)
+    return None
+
+def cache_set(url: str, items, ttl_sec: int = 30):
+    _CACHE[url] = (time.time() + ttl_sec, items)
 
 def parse_notice_list(html, base):
     soup = BeautifulSoup(html, "html.parser")
     items = []
     elems = []
 
-    # 1) 기존 방식 유지: 셀렉터를 순서대로 탐색해 첫 매칭을 사용
+    # 1) 기존 방식 그대로: 먼저 매칭되는 구조 사용
     for sel in NOTICE_SELECTORS:
         elems = soup.select(sel)
         if elems:
@@ -88,15 +115,15 @@ def parse_notice_list(html, base):
     if not elems:
         return items
 
-    # 2) 각 공지 항목 파싱 (기존 로직 유지 + 학술정보관 케이스만 안전하게 추가 대응)
     for el in elems[:60]:
         a = el.find("a")
         if not a:
             continue
 
         # 제목
-        # (학술정보관은 <span class="btn btn-xs">일반</span> 같은 태그가 제목 앞에 붙어 있어서 제거)
         raw_title = a.get_text(" ", strip=True)
+
+        # ✅ 학술정보관: <span class="btn btn-xs">일반</span> 같은 꼬리표 제거(있을 때만)
         tag = a.find("span", class_=re.compile(r"\bbtn\b"))
         if tag:
             tag_text = tag.get_text(" ", strip=True)
@@ -122,16 +149,14 @@ def parse_notice_list(html, base):
         if d:
             date = d.get_text(strip=True)
 
-        # ✅ (추가) 학술정보관처럼 class로 날짜가 없으면 텍스트에서 "작성일/게시일/날짜패턴" 추출
-        # 기존 사이트는 date가 이미 잡히므로, 기존 동작에 영향 없음
+        # ✅ class로 못 찾으면 텍스트에서 작성일/게시일/날짜패턴 추출 (기존 영향 없음)
         if not date:
             text_all = " ".join(el.stripped_strings)
             m = RE_DATE_WRITTEN.search(text_all) or RE_DATE_PUBLISHED.search(text_all) or RE_DATE_ANY.search(text_all)
             if m:
                 date = m.group(1).replace(".", "-").replace("/", "-")
 
-        # ✅ (추가) 학술정보관: "글쓴이 홍길동 / 조회수 ..." 형태면 정규식으로 작성자 추출
-        # 기존 사이트는 author가 이미 잡히므로, 기존 동작에 영향 없음
+        # ✅ 학술정보관: 글쓴이 텍스트에서 추출(기존 영향 없음)
         if not author:
             text_all = " ".join(el.stripped_strings)
             ma = RE_AUTHOR.search(text_all)
@@ -145,19 +170,43 @@ def parse_notice_list(html, base):
 def fetch_one(url):
     if not url:
         return []
-    try:
-        r = SESSION.get(url, headers=HEADERS, timeout=7)
-        r.raise_for_status()
-        return parse_notice_list(r.text, url)
-    except:
-        return []
+
+    # 캐시 hit
+    cached = cache_get(url)
+    if cached is not None:
+        return cached
+
+    lib = is_library_url(url)
+    headers = HEADERS_LIB if lib else HEADERS_DEFAULT
+    timeout = 12 if lib else 7  # 학술정보관만 여유
+    attempts = 2 if lib else 1  # 학술정보관만 재시도
+
+    last_err = None
+    for i in range(attempts):
+        try:
+            r = SESSION.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            # 403/500이어도 html은 받을 수 있으니, "raise_for_status"로 바로 죽이지 않음
+            html = r.text or ""
+            items = parse_notice_list(html, url)
+
+            # 학술정보관인데 items 0이면 상태코드 로그(렌더 로그에서 확인 가능)
+            if lib and not items:
+                print(f"[LIB EMPTY] status={r.status_code} url={url}")
+
+            cache_set(url, items, ttl_sec=30)
+            return items
+        except Exception as e:
+            last_err = e
+            if lib:
+                print(f"[LIB ERR] try={i+1}/{attempts} url={url} err={e}")
+
+    return []
 
 @app.route("/fetch")
 def fetch_api():
     group = request.args.get("group")
     sub = request.args.get("sub")
 
-    # 기존 방식 유지: 하위카테고리는 flat으로 합쳐 sub로 직접 요청 가능
     flat = {}
     for g, v in CATEGORIES.items():
         if isinstance(v, dict):
@@ -183,7 +232,6 @@ def fetch_api():
 
 @app.route("/")
 def index():
-    # 기존 방식 유지: 하위 카테고리 key 목록만 뽑아서 JS로 전달
     groups = {g: (list(v.keys()) if isinstance(v, dict) else []) for g, v in CATEGORIES.items()}
     return render_template("index.html", groups=groups)
 
