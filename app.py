@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import re
 import time
 
@@ -99,7 +99,7 @@ def cache_get(url: str):
     _CACHE.pop(url, None)
     return None
 
-def cache_set(url: str, items, ttl_sec: int = 30):
+def cache_set(url: str, items, ttl_sec: int = 300):
     _CACHE[url] = (time.time() + ttl_sec, items)
 
 def parse_notice_list(html, base):
@@ -178,7 +178,7 @@ def fetch_one(url):
 
     lib = is_library_url(url)
     headers = HEADERS_LIB if lib else HEADERS_DEFAULT
-    timeout = 12 if lib else 7  # 학술정보관만 여유
+    timeout = 8 if lib else 6  # 학술정보관만 여유
     attempts = 2 if lib else 1  # 학술정보관만 재시도
 
     last_err = None
@@ -221,11 +221,15 @@ def fetch_api():
         val = CATEGORIES.get(group)
         if isinstance(val, dict):
             results = []
-            with ThreadPoolExecutor(max_workers=10) as ex:
-                tasks = [ex.submit(fetch_one, u) for u in val.values()]
-                for f in as_completed(tasks):
-                    results.extend(f.result())
-            return jsonify({"items": results})
+with ThreadPoolExecutor(max_workers=6) as ex:
+    futures = [ex.submit(fetch_one, u) for u in val.values()]
+    try:
+        for f in as_completed(futures, timeout=5):  # ✅ 전체를 최대 5초만 기다림
+            results.extend(f.result())
+    except TimeoutError:
+        pass  # ✅ 5초 넘는 애들은 일단 포기하고, 받은 것만 반환
+return jsonify({"items": results})
+            
         return jsonify({"items": fetch_one(val)})
 
     return jsonify({"items": []})
@@ -237,3 +241,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
